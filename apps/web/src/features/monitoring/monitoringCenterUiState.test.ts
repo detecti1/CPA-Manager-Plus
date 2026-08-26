@@ -11,6 +11,11 @@ import {
   readMonitoringCenterUiState,
   writeMonitoringCenterUiState,
 } from './monitoringCenterUiState';
+import {
+  DEFAULT_REALTIME_VISIBLE_COLUMNS,
+  getRealtimeTableWidth,
+  normalizeRealtimeVisibleColumns,
+} from './realtimeColumns';
 
 type StorageLike = {
   getItem: (key: string) => string | null;
@@ -74,6 +79,26 @@ describe('monitoringCenterUiState', () => {
     expect(normalizeMonitoringAutoRefreshMs('123')).toBe('30000');
   });
 
+  it('normalizes realtime columns in canonical order and restores mandatory columns', () => {
+    expect(normalizeRealtimeVisibleColumns(undefined)).toEqual(DEFAULT_REALTIME_VISIBLE_COLUMNS);
+    expect(normalizeRealtimeVisibleColumns(['cost', 'model', 'cost', 'unknown', 'usage'])).toEqual([
+      'source',
+      'model',
+      'request-status',
+      'time',
+      'usage',
+      'cost',
+    ]);
+    expect(normalizeRealtimeVisibleColumns([])).toEqual([
+      'source',
+      'model',
+      'request-status',
+      'time',
+    ]);
+    expect(getRealtimeTableWidth(DEFAULT_REALTIME_VISIBLE_COLUMNS)).toBe(1236);
+    expect(getRealtimeTableWidth([])).toBe(0);
+  });
+
   it('normalizes ui state from arbitrary input', () => {
     expect(normalizeMonitoringCenterUiState(null)).toEqual(getDefaultMonitoringCenterUiState());
     expect(normalizeMonitoringCenterUiState({ activeDataTab: 'realtime' })).toEqual({
@@ -96,6 +121,7 @@ describe('monitoringCenterUiState', () => {
         selectedStatus: 'failed',
         apiKeyPageSize: 50,
         realtimePageSize: 150,
+        realtimeVisibleColumns: ['usage', 'source', 'cost'],
       })
     ).toEqual({
       ...getDefaultMonitoringCenterUiState(),
@@ -113,6 +139,7 @@ describe('monitoringCenterUiState', () => {
       selectedStatus: 'failed',
       apiKeyPageSize: 50,
       realtimePageSize: 150,
+      realtimeVisibleColumns: ['source', 'model', 'request-status', 'time', 'usage', 'cost'],
     });
   });
 
@@ -121,18 +148,21 @@ describe('monitoringCenterUiState', () => {
       activeDataTab: 'apiKeys',
       selectedProvider: 'claude',
       apiKeyPageSize: 20,
+      realtimeVisibleColumns: ['source', 'model', 'request-status', 'time', 'usage'],
     });
     expect(JSON.parse(storage.getItem(MONITORING_CENTER_UI_STATE_STORAGE_KEY) ?? '{}')).toEqual({
       ...getDefaultMonitoringCenterUiState(),
       activeDataTab: 'apiKeys',
       selectedProvider: 'claude',
       apiKeyPageSize: 20,
+      realtimeVisibleColumns: ['source', 'model', 'request-status', 'time', 'usage'],
     });
     expect(readMonitoringCenterUiState()).toEqual({
       ...getDefaultMonitoringCenterUiState(),
       activeDataTab: 'apiKeys',
       selectedProvider: 'claude',
       apiKeyPageSize: 20,
+      realtimeVisibleColumns: ['source', 'model', 'request-status', 'time', 'usage'],
     });
   });
 

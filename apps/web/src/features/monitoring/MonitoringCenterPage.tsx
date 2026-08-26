@@ -366,6 +366,9 @@ export function MonitoringCenterPage() {
   const [realtimePageSize, setRealtimePageSize] = useState(
     initialMonitoringCenterUiState.current.realtimePageSize
   );
+  const [realtimeVisibleColumns, setRealtimeVisibleColumns] = useState(
+    () => initialMonitoringCenterUiState.current.realtimeVisibleColumns
+  );
   const focusSnapshotRef = useRef<FocusSnapshot | null>(null);
   const previousAccountPageResetStateRef = useRef<AccountOverviewPageResetState | null>(null);
   const accountQuotaStatesByRowIdRef = useRef<Record<string, AccountQuotaState>>({});
@@ -809,6 +812,7 @@ export function MonitoringCenterPage() {
       selectedStatus,
       apiKeyPageSize,
       realtimePageSize,
+      realtimeVisibleColumns,
     });
   }, [
     activeDataTab,
@@ -817,6 +821,7 @@ export function MonitoringCenterPage() {
     customEndInput,
     customStartInput,
     realtimePageSize,
+    realtimeVisibleColumns,
     searchInput,
     selectedAccount,
     selectedApiKeyHash,
@@ -1726,9 +1731,11 @@ export function MonitoringCenterPage() {
         scopedFailureCount={scopedFailureCount}
         failedOnlyActive={failedOnlyActive}
         accountDisplayMode={accountDisplayMode}
+        visibleColumns={realtimeVisibleColumns}
         t={t}
         onToggleFailedOnly={toggleFailedOnly}
         onAccountDisplayModeChange={setAccountDisplayMode}
+        onVisibleColumnsChange={setRealtimeVisibleColumns}
       />
     );
   }, [
@@ -1742,6 +1749,7 @@ export function MonitoringCenterPage() {
     handleAccountSortKeyChange,
     overallLoading,
     realtimeLogRows.length,
+    realtimeVisibleColumns,
     refreshAll,
     scopedFailureCount,
     searchInput,
@@ -2202,11 +2210,13 @@ export function MonitoringCenterPage() {
               overallLoading={overallLoading}
               hasPrices={hasPrices}
               accountDisplayMode={accountDisplayMode}
+              visibleColumns={realtimeVisibleColumns}
               locale={i18n.language}
               emptyState={renderMonitoringEmptyState()}
               t={t}
               onToggleFailedOnly={toggleFailedOnly}
               onAccountDisplayModeChange={setAccountDisplayMode}
+              onVisibleColumnsChange={setRealtimeVisibleColumns}
               onPageChange={setRealtimePage}
               onPageSizeChange={handleRealtimePageSizeChange}
               onLoadMoreEvents={loadMoreEvents}

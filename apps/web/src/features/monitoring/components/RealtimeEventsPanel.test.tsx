@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import { describe, expect, it, vi } from 'vitest';
 import type { AccountDisplayMode } from '@/features/monitoring/accountOverviewState';
 import type { MonitoringEventRow } from '@/features/monitoring/hooks/useMonitoringData';
+import type { RealtimeColumnId } from '@/features/monitoring/realtimeColumns';
 import styles from '../MonitoringCenterPage.module.scss';
 import { RealtimeEventsPanel } from './RealtimeEventsPanel';
 
@@ -10,6 +11,7 @@ const t = ((key: string, options?: Record<string, unknown>) => {
   const messages: Record<string, string> = {
     'common.loading': 'Loading',
     'common.copy': 'Copy',
+    'common.reset': 'Reset',
     'common.yes': 'Yes',
     'common.no': 'No',
     'monitoring.account_overview_account_display_masked': 'Masked',
@@ -47,6 +49,8 @@ const t = ((key: string, options?: Record<string, unknown>) => {
     'monitoring.realtime_usage_cached_label': 'Cached',
     'monitoring.realtime_usage_cache_read_label': 'Cache Read',
     'monitoring.realtime_usage_cache_creation_label': 'Cache Creation',
+    'monitoring.realtime_columns': 'Columns',
+    'monitoring.realtime_column_fixed': 'Fixed',
     'monitoring.load_more_events': 'Load more',
     'monitoring.log_rows': 'Rows',
     'monitoring.no_more_events': 'No more events',
@@ -108,6 +112,7 @@ type PanelOverrides = {
   eventsTotalCount?: number;
   eventsLoadedCount?: number;
   hasPrices?: boolean;
+  visibleColumns?: readonly RealtimeColumnId[];
 };
 
 const baseRow = (overrides: Partial<PanelRow> = {}): PanelRow => ({
@@ -191,6 +196,8 @@ const renderPanel = (row: PanelRow, overrides: PanelOverrides = {}) =>
       onPageChange={noop}
       onPageSizeChange={noop}
       onLoadMoreEvents={noop}
+      visibleColumns={overrides.visibleColumns}
+      onVisibleColumnsChange={noop}
     />
   );
 
@@ -224,15 +231,21 @@ describe('RealtimeEventsPanel', () => {
       })
     );
 
-    expect(markup).toContain(
-      `class="${styles.realtimeSettingsColumn}">Reasoning / Tier</th>`
+    expect(markup).toContain('data-column="settings">Reasoning / Tier</th>');
+    expect(markup).toMatch(
+      new RegExp(`data-column="settings" class="[^"]*${styles.realtimeCenteredColumn}[^"]*"`)
     );
     expect(markup).toContain('>TPS</th>');
     expect(markup).toContain(styles.realtimeTpsColumn);
     expect(markup).toContain(styles.realtimeLatencyColumn);
     expect(markup).toContain(styles.realtimeTimeColumn);
-    expect(markup.match(new RegExp(styles.realtimeCenteredColumn, 'g'))).toHaveLength(8);
-    expect(markup.match(new RegExp(styles.realtimeSettingsColumn, 'g'))).toHaveLength(2);
+    expect(markup).toContain('data-column="usage"');
+    expect(markup).toContain('style="width:100%;min-width:1236px"');
+    expect(markup).toContain('data-column="source" style="width:calc((100% - 904px)');
+    expect(markup).toContain('data-column="model" style="width:calc((100% - 904px)');
+    expect(markup).toMatch(
+      new RegExp(`data-column="model" class="[^"]*${styles.realtimeCenteredColumn}[^"]*"`)
+    );
     expect(markup).toContain('>Recent Status</th>');
     expect(markup).toContain('>Success Rate</th>');
     expect(markup).toContain('Source / API Key');
@@ -248,6 +261,11 @@ describe('RealtimeEventsPanel', () => {
     expect(markup).toContain('client-gpt');
     expect(markup).toContain('gpt-5.4');
     expect(markup).not.toContain('Resolved');
+    expect(markup).toContain('🧮');
+    expect(markup).toContain('⬆️');
+    expect(markup).toContain('⬇️');
+    expect(markup).toContain('⚡️');
+    expect(markup).toContain('🧠');
     expect(markup).not.toContain('POST /v1/chat/completions');
     expect(markup).toContain('Failed');
     expect(markup).toContain('>Elapsed</th>');
@@ -259,8 +277,8 @@ describe('RealtimeEventsPanel', () => {
     expect(markup).not.toContain('>Gen</span>');
     expect(markup).not.toContain('>E2E</span>');
     expect(markup).toContain(styles.realtimeUsageCell);
-    expect(markup).toContain('>↑</span>10');
-    expect(markup).toContain('>↓</span>20');
+    expect(markup).toContain('>⬇️</span><span>10</span>');
+    expect(markup).toContain('>⬆️</span><span>20</span>');
     expect(markup).toContain('>Total</span>');
     expect(markup).toContain('>Input</span>');
     expect(markup).toContain('>Output</span>');
@@ -354,17 +372,15 @@ describe('RealtimeEventsPanel', () => {
     expect(
       markup.match(new RegExp(`class="[^"]*${styles.realtimeSettingValue}[^"]*">-</span>`, 'g'))
     ).toHaveLength(2);
-    expect(markup).toContain(
-      `class="${styles.realtimeSettingsColumn}">Reasoning / Tier</th>`
-    );
+    expect(markup).toContain('data-column="settings">Reasoning / Tier</th>');
     expect(markup).toContain('>TPS</th>');
     expect(markup).toContain('Success');
     expect(markup).toContain('>Elapsed</th>');
     expect(markup).toContain('>TTFT</span><span class=');
     expect(markup).toContain(expectedDate);
     expect(markup).toContain(expectedTime);
-    expect(markup).toContain('>↑</span>10');
-    expect(markup).toContain('>↓</span>20');
+    expect(markup).toContain('>⬇️</span><span>10</span>');
+    expect(markup).toContain('>⬆️</span><span>20</span>');
     expect(markup).toContain('>Reasoning</span><span class=');
     expect(markup).toContain('>0</span>');
     expect(markup).toContain(styles.realtimeUsageTooltip);
@@ -389,7 +405,7 @@ describe('RealtimeEventsPanel', () => {
       })
     );
 
-    expect(markup).toContain('<th>Source / API Key</th>');
+    expect(markup).toContain('data-column="source">Source / API Key</th>');
     expect(markup).toContain('API Key: Team A');
     expect(markup).not.toContain('#12345678');
     expect(markup).toContain('API Key hash: 1234567890abcdef');
@@ -419,9 +435,7 @@ describe('RealtimeEventsPanel', () => {
       })
     );
 
-    expect(markup).toContain(
-      'title="deepseek-v4-flash(max)\nresolved-deepseek-v4-flash"'
-    );
+    expect(markup).toContain('title="deepseek-v4-flash(max)\nresolved-deepseek-v4-flash"');
     expect(markup.indexOf('>deepseek-v4-flash(max)</span>')).toBeLessThan(
       markup.indexOf('>resolved-deepseek-v4-flash</small>')
     );
@@ -502,9 +516,7 @@ describe('RealtimeEventsPanel', () => {
     expect(fullMarkup).toContain(`<details class="${styles.realtimeRequestMetadata}">`);
     expect(fullMarkup).toContain('<summary>Request metadata</summary>');
     expect(fullMarkup).toContain('Client IP: 192.0.2.10');
-    expect(fullMarkup).toContain(
-      'Forwarded chain (unverified): 203.0.113.5, 198.51.100.8'
-    );
+    expect(fullMarkup).toContain('Forwarded chain (unverified): 203.0.113.5, 198.51.100.8');
     expect(fullMarkup).toContain('User-Agent: test-client/1.0');
   });
 
@@ -568,8 +580,34 @@ describe('RealtimeEventsPanel', () => {
     expect(markup).toContain('>Cache Creation</span><span class=');
     expect(markup).toContain('>151.0K</span>');
     expect(markup).toContain('>1.0K</span>');
-    expect(markup).toContain('aria-label="Total: 33, Input: 152.6K, Output: 20, Reasoning: 3, Cached: 0, Cache Read: 151.0K, Cache Creation: 1.0K"');
+    expect(markup).toContain(
+      'aria-label="Total: 33, Input: 152.6K, Output: 20, Cached: 151.0K, Reasoning: 3"'
+    );
     expect(markup).toContain('tabindex="0"');
+  });
+
+  it('uses a compact dynamic width and restores mandatory columns', () => {
+    const markup = renderPanel(baseRow(), { visibleColumns: ['usage'] });
+
+    expect(markup).toContain('style="width:100%;min-width:676px"');
+    expect(markup).toContain('data-column="source" style="width:calc((100% - 344px)');
+    expect(markup).toContain('data-column="model" style="width:calc((100% - 344px)');
+    expect(markup.match(/<col\b/g)).toHaveLength(5);
+    expect(markup).toContain('data-column="source"');
+    expect(markup).toContain('data-column="model"');
+    expect(markup).toContain('data-column="request-status"');
+    expect(markup).toContain('data-column="time"');
+    expect(markup).toContain('data-column="usage"');
+    expect(markup).not.toContain('data-column="cost"');
+    expect(markup).not.toContain('data-column="settings"');
+  });
+
+  it('prefers cache read tokens and falls back to legacy cached tokens', () => {
+    const cacheReadMarkup = renderPanel(baseRow({ cachedTokens: 7_000, cacheReadTokens: 4_000 }));
+    const legacyMarkup = renderPanel(baseRow({ cachedTokens: 7_000, cacheReadTokens: 0 }));
+
+    expect(cacheReadMarkup).toContain('>⚡️</span><span>4.0K</span>');
+    expect(legacyMarkup).toContain('>⚡️</span><span>7.0K</span>');
   });
 
   it('shows the loaded vs total summary with a load-more action when more pages exist', () => {

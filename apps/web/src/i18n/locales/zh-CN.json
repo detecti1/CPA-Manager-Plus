@@ -2433,6 +2433,8 @@
     "realtime_usage_cached_label": "缓存",
     "realtime_usage_cache_read_label": "缓存读取",
     "realtime_usage_cache_creation_label": "缓存创建",
+    "realtime_columns": "列",
+    "realtime_column_fixed": "固定",
     "reasoning_effort": "思考强度",
     "reasoning_effort_short": "强度",
     "reasoning_service_short": "推理/服务",

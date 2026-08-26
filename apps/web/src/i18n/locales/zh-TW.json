@@ -2433,6 +2433,8 @@
     "realtime_usage_cached_label": "快取",
     "realtime_usage_cache_read_label": "快取讀取",
     "realtime_usage_cache_creation_label": "快取建立",
+    "realtime_columns": "欄位",
+    "realtime_column_fixed": "固定",
     "reasoning_effort": "思考強度",
     "reasoning_effort_short": "強度",
     "reasoning_service_short": "推理/服務",

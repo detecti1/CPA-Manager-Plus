@@ -1,3 +1,9 @@
+import {
+  DEFAULT_REALTIME_VISIBLE_COLUMNS,
+  normalizeRealtimeVisibleColumns,
+  type RealtimeColumnId,
+} from '@/features/monitoring/realtimeColumns';
+
 export type MonitoringDataTab = 'accounts' | 'apiKeys' | 'realtime';
 export type MonitoringCenterTimeRange = 'today' | '7d' | '14d' | '30d' | 'all' | 'custom';
 export type MonitoringCenterStatusFilter = 'all' | 'success' | 'failed';
@@ -32,6 +38,7 @@ export type MonitoringCenterUiState = {
   selectedStatus: MonitoringCenterStatusFilter;
   apiKeyPageSize: number;
   realtimePageSize: number;
+  realtimeVisibleColumns: RealtimeColumnId[];
 };
 
 const TAB_SET = new Set<MonitoringDataTab>(MONITORING_DATA_TABS);
@@ -103,6 +110,7 @@ export const getDefaultMonitoringCenterUiState = (): MonitoringCenterUiState => 
   selectedStatus: 'all',
   apiKeyPageSize: DEFAULT_MONITORING_TABLE_PAGE_SIZE,
   realtimePageSize: DEFAULT_MONITORING_REALTIME_PAGE_SIZE,
+  realtimeVisibleColumns: [...DEFAULT_REALTIME_VISIBLE_COLUMNS],
 });
 
 export const normalizeMonitoringCenterUiState = (value: unknown): MonitoringCenterUiState => {
@@ -138,6 +146,7 @@ export const normalizeMonitoringCenterUiState = (value: unknown): MonitoringCent
       REALTIME_PAGE_SIZE_OPTIONS,
       defaults.realtimePageSize
     ),
+    realtimeVisibleColumns: normalizeRealtimeVisibleColumns(record.realtimeVisibleColumns),
   };
 };
 

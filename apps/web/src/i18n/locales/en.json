@@ -2435,6 +2435,8 @@
     "realtime_usage_cached_label": "Cached",
     "realtime_usage_cache_read_label": "Cache Read",
     "realtime_usage_cache_creation_label": "Cache Creation",
+    "realtime_columns": "Columns",
+    "realtime_column_fixed": "Fixed",
     "reasoning_effort": "Reasoning Effort",
     "reasoning_effort_short": "Effort",
     "reasoning_service_short": "Reasoning / Tier",

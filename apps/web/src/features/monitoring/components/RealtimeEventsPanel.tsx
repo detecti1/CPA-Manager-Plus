@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -12,7 +13,14 @@ import {
 import { createPortal } from 'react-dom';
 import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
-import { IconCopy, IconEye, IconEyeOff, IconFilter } from '@/components/ui/icons';
+import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
+import {
+  IconCopy,
+  IconEye,
+  IconEyeOff,
+  IconFilter,
+  IconSlidersHorizontal,
+} from '@/components/ui/icons';
 import {
   PaginationControls,
   RecentPattern,
@@ -22,6 +30,15 @@ import { formatPercent } from '@/features/monitoring/components/accountOverviewP
 import { buildRealtimeSourceDisplay } from '@/features/monitoring/realtimeSourceDisplay';
 import type { MonitoringEventRow } from '@/features/monitoring/hooks/useMonitoringData';
 import type { AccountDisplayMode } from '@/features/monitoring/accountOverviewState';
+import {
+  DEFAULT_REALTIME_VISIBLE_COLUMNS,
+  REALTIME_COLUMN_DEFINITIONS,
+  getRealtimeColumnDefinitions,
+  getRealtimeTableWidth,
+  normalizeRealtimeVisibleColumns,
+  type RealtimeColumnDefinition,
+  type RealtimeColumnId,
+} from '@/features/monitoring/realtimeColumns';
 import { useNotificationStore } from '@/stores';
 import { copyToClipboard } from '@/utils/clipboard';
 import { maskSensitiveText, truncateText } from '@/utils/format';
@@ -67,6 +84,8 @@ type RealtimeEventsPanelProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onLoadMoreEvents: () => void;
+  visibleColumns?: readonly RealtimeColumnId[];
+  onVisibleColumnsChange?: (columns: RealtimeColumnId[]) => void;
 };
 
 export type RealtimeEventsPanelActionsProps = {
@@ -77,6 +96,8 @@ export type RealtimeEventsPanelActionsProps = {
   t: TFunction;
   onToggleFailedOnly: () => void;
   onAccountDisplayModeChange: (mode: AccountDisplayMode) => void;
+  visibleColumns?: readonly RealtimeColumnId[];
+  onVisibleColumnsChange?: (columns: RealtimeColumnId[]) => void;
 };
 
 const REALTIME_PAGE_SIZE_OPTIONS = [10, 50, 100, 150, 300] as const;
@@ -122,6 +143,169 @@ const shortLabel = (
   const label = t(shortKey, { defaultValue: fallback });
   return label === shortKey ? (fallbackDefault ?? fallback) : label;
 };
+
+const getRealtimeColumnLabel = (columnId: RealtimeColumnId, t: TFunction): string => {
+  switch (columnId) {
+    case 'source':
+      return shortLabel(
+        t,
+        'monitoring.column_source_api_key_short',
+        'monitoring.column_source_api_key'
+      );
+    case 'model':
+      return t('monitoring.column_model');
+    case 'settings':
+      return t('monitoring.reasoning_service_short');
+    case 'recent-status':
+      return shortLabel(t, 'monitoring.recent_status_short', 'monitoring.recent_status');
+    case 'request-status':
+      return shortLabel(t, 'monitoring.request_status_short', 'monitoring.request_status');
+    case 'success-rate':
+      return shortLabel(
+        t,
+        'monitoring.column_success_rate_short',
+        'monitoring.column_success_rate'
+      );
+    case 'calls':
+      return shortLabel(t, 'monitoring.total_calls_short', 'monitoring.total_calls', 'Calls');
+    case 'tps':
+      return t('monitoring.column_output_tps');
+    case 'latency':
+      return t('monitoring.elapsed_short');
+    case 'time':
+      return t('monitoring.column_time');
+    case 'usage':
+      return shortLabel(t, 'monitoring.this_call_usage_short', 'monitoring.this_call_usage');
+    case 'cost':
+      return shortLabel(t, 'monitoring.this_call_cost_short', 'monitoring.this_call_cost');
+  }
+};
+
+type RealtimeColumnSelectorProps = {
+  visibleColumns: readonly RealtimeColumnId[];
+  t: TFunction;
+  onChange: (columns: RealtimeColumnId[]) => void;
+};
+
+function RealtimeColumnSelector({ visibleColumns, t, onChange }: RealtimeColumnSelectorProps) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<CSSProperties | null>(null);
+  const panelId = useId();
+  const normalizedVisibleColumns = normalizeRealtimeVisibleColumns(visibleColumns);
+  const visibleColumnSet = new Set(normalizedVisibleColumns);
+  const label = t('monitoring.realtime_columns');
+
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current || typeof window === 'undefined') return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const panelWidth = panelRef.current?.offsetWidth ?? 224;
+    const viewportPadding = 8;
+    const left = Math.max(
+      viewportPadding,
+      Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - viewportPadding)
+    );
+    setPosition({ top: rect.bottom + 6, left });
+  }, []);
+
+  const close = useCallback((restoreFocus = false) => {
+    setOpen(false);
+    setPosition(null);
+    if (restoreFocus) triggerRef.current?.focus();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open || typeof window === 'undefined') return undefined;
+
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      close();
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      close(true);
+    };
+    const handleViewportChange = () => updatePosition();
+
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
+    };
+  }, [close, open, updatePosition]);
+
+  const panel = open ? (
+    <div
+      ref={panelRef}
+      id={panelId}
+      role="dialog"
+      aria-label={label}
+      className={styles.realtimeColumnSelectorPanel}
+      style={position ?? { visibility: 'hidden', top: 0, left: 0 }}
+    >
+      <div className={styles.realtimeColumnSelectorList}>
+        {REALTIME_COLUMN_DEFINITIONS.map((column) => (
+          <SelectionCheckbox
+            key={column.id}
+            checked={visibleColumnSet.has(column.id)}
+            disabled={!column.hideable}
+            label={
+              <span className={styles.realtimeColumnSelectorLabel}>
+                <span>{getRealtimeColumnLabel(column.id, t)}</span>
+                {!column.hideable ? <small>{t('monitoring.realtime_column_fixed')}</small> : null}
+              </span>
+            }
+            onChange={(checked) => {
+              const nextColumns = checked
+                ? [...normalizedVisibleColumns, column.id]
+                : normalizedVisibleColumns.filter((columnId) => columnId !== column.id);
+              onChange(normalizeRealtimeVisibleColumns(nextColumns));
+            }}
+          />
+        ))}
+      </div>
+      <button
+        type="button"
+        className={styles.realtimeColumnSelectorReset}
+        onClick={() => onChange([...DEFAULT_REALTIME_VISIBLE_COLUMNS])}
+      >
+        {t('common.reset')}
+      </button>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.accountOverviewToolButton}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        title={label}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <IconSlidersHorizontal size={15} aria-hidden="true" />
+        <span>{label}</span>
+      </button>
+      {panel && typeof document !== 'undefined' ? createPortal(panel, document.body) : null}
+    </>
+  );
+}
 
 const formatShortHash = (value: string | null | undefined) => {
   const trimmed = formatReadableText(value);
@@ -730,11 +914,15 @@ type RealtimeTokenUsageDetails = {
   total: string;
   input: string;
   output: string;
+  cache: string;
+  reasoning: string;
   fields: Array<{ label: string; value: string }>;
   ariaLabel: string;
 };
 
 const buildRealtimeTokenUsageDetails = (row: MonitoringEventRow, t: TFunction) => {
+  const displayCacheTokens =
+    row.cacheReadTokens > 0 ? row.cacheReadTokens : Math.max(row.cachedTokens, 0);
   const fields = [
     {
       label: t('monitoring.realtime_usage_total_label'),
@@ -750,7 +938,7 @@ const buildRealtimeTokenUsageDetails = (row: MonitoringEventRow, t: TFunction) =
     },
     {
       label: t('monitoring.realtime_usage_reasoning_label'),
-      value: String(row.reasoningTokens),
+      value: formatCompactNumber(row.reasoningTokens),
     },
     {
       label: t('monitoring.realtime_usage_cached_label'),
@@ -770,8 +958,21 @@ const buildRealtimeTokenUsageDetails = (row: MonitoringEventRow, t: TFunction) =
     total: fields[0].value,
     input: fields[1].value,
     output: fields[2].value,
+    cache: formatCompactNumber(displayCacheTokens),
+    reasoning: fields[3].value,
     fields,
-    ariaLabel: fields.map((field) => `${field.label}: ${field.value}`).join(', '),
+    ariaLabel: [
+      fields[0],
+      fields[1],
+      fields[2],
+      {
+        label: t('monitoring.realtime_usage_cached_label'),
+        value: formatCompactNumber(displayCacheTokens),
+      },
+      fields[3],
+    ]
+      .map((field) => `${field.label}: ${field.value}`)
+      .join(', '),
   } satisfies RealtimeTokenUsageDetails;
 };
 
@@ -916,16 +1117,35 @@ function RealtimeTokenUsage({ details, tooltipId }: RealtimeTokenUsageProps) {
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
     >
-      <span className={styles.realtimeUsageTotal}>{details.total}</span>
-      <span className={styles.realtimeUsageFlow}>
-        <span className={styles.realtimeUsageMetric}>
-          <span aria-hidden="true">↑</span>
-          {details.input}
+      <span className={`${styles.realtimeUsageMetric} ${styles.realtimeUsageTotal}`}>
+        <span className={styles.realtimeUsageIcon} aria-hidden="true">
+          🧮
         </span>
-        <span className={styles.realtimeUsageMetric}>
-          <span aria-hidden="true">↓</span>
-          {details.output}
+        <span>{details.total}</span>
+      </span>
+      <span className={styles.realtimeUsageMetric}>
+        <span className={styles.realtimeUsageIcon} aria-hidden="true">
+          ⬇️
         </span>
+        <span>{details.input}</span>
+      </span>
+      <span className={styles.realtimeUsageMetric}>
+        <span className={styles.realtimeUsageIcon} aria-hidden="true">
+          ⬆️
+        </span>
+        <span>{details.output}</span>
+      </span>
+      <span className={`${styles.realtimeUsageMetric} ${styles.realtimeUsageSecondary}`}>
+        <span className={styles.realtimeUsageIcon} aria-hidden="true">
+          ⚡️
+        </span>
+        <span>{details.cache}</span>
+      </span>
+      <span className={`${styles.realtimeUsageMetric} ${styles.realtimeUsageSecondary}`}>
+        <span className={styles.realtimeUsageIcon} aria-hidden="true">
+          🧠
+        </span>
+        <span>{details.reasoning}</span>
       </span>
       {!isBrowser ? tooltip : null}
       {isBrowser && open ? createPortal(tooltip, document.body) : null}
@@ -938,9 +1158,11 @@ export function RealtimeEventsPanelActions({
   scopedFailureCount,
   failedOnlyActive,
   accountDisplayMode,
+  visibleColumns = DEFAULT_REALTIME_VISIBLE_COLUMNS,
   t,
   onToggleFailedOnly,
   onAccountDisplayModeChange,
+  onVisibleColumnsChange = () => undefined,
 }: RealtimeEventsPanelActionsProps) {
   const nextAccountDisplayMode: AccountDisplayMode =
     accountDisplayMode === 'masked' ? 'full' : 'masked';
@@ -968,6 +1190,11 @@ export function RealtimeEventsPanelActions({
       <span title={t('monitoring.recent_failures')}>
         {`${recentFailuresLabel}: ${scopedFailureCount}`}
       </span>
+      <RealtimeColumnSelector
+        visibleColumns={visibleColumns}
+        t={t}
+        onChange={onVisibleColumnsChange}
+      />
       <button
         type="button"
         className={[
@@ -1027,42 +1254,18 @@ export function RealtimeEventsPanel({
   onPageChange,
   onPageSizeChange,
   onLoadMoreEvents,
+  visibleColumns = DEFAULT_REALTIME_VISIBLE_COLUMNS,
+  onVisibleColumnsChange = () => undefined,
 }: RealtimeEventsPanelProps) {
   const tooltipIdPrefix = useId();
   const showNotification = useNotificationStore((state) => state.showNotification);
-  const sourceApiKeyLabel = shortLabel(
-    t,
-    'monitoring.column_source_api_key_short',
-    'monitoring.column_source_api_key'
-  );
-  const reasoningServiceLabel = t('monitoring.reasoning_service_short');
-  const recentStatusLabel = shortLabel(
-    t,
-    'monitoring.recent_status_short',
-    'monitoring.recent_status'
-  );
-  const requestStatusLabel = shortLabel(
-    t,
-    'monitoring.request_status_short',
-    'monitoring.request_status'
-  );
-  const successRateLabel = shortLabel(
-    t,
-    'monitoring.column_success_rate_short',
-    'monitoring.column_success_rate'
-  );
-  const totalCallsLabel = shortLabel(
-    t,
-    'monitoring.total_calls_short',
-    'monitoring.total_calls',
-    'Calls'
-  );
-  const usageLabel = shortLabel(
-    t,
-    'monitoring.this_call_usage_short',
-    'monitoring.this_call_usage'
-  );
-  const costLabel = shortLabel(t, 'monitoring.this_call_cost_short', 'monitoring.this_call_cost');
+  const normalizedVisibleColumns = normalizeRealtimeVisibleColumns(visibleColumns);
+  const visibleColumnDefinitions = getRealtimeColumnDefinitions(normalizedVisibleColumns);
+  const tableWidth = getRealtimeTableWidth(normalizedVisibleColumns);
+  const flexibleColumnWidth = visibleColumnDefinitions
+    .filter((column) => column.id === 'source' || column.id === 'model')
+    .reduce((total, column) => total + column.width, 0);
+  const fixedColumnWidth = tableWidth - flexibleColumnWidth;
   const handleCopyFailureDetails = async (text: string) => {
     const copied = await copyToClipboard(text);
     showNotification(
@@ -1076,43 +1279,41 @@ export function RealtimeEventsPanel({
       scopedFailureCount={scopedFailureCount}
       failedOnlyActive={failedOnlyActive}
       accountDisplayMode={accountDisplayMode}
+      visibleColumns={normalizedVisibleColumns}
       t={t}
       onToggleFailedOnly={onToggleFailedOnly}
       onAccountDisplayModeChange={onAccountDisplayModeChange}
+      onVisibleColumnsChange={onVisibleColumnsChange}
     />
   );
   const content = (
     <>
       <div className={styles.tableWrapper}>
-        <table className={`${styles.table} ${styles.realtimeTable}`}>
+        <table
+          className={`${styles.table} ${styles.realtimeTable}`}
+          style={{ width: '100%', minWidth: tableWidth }}
+        >
           <colgroup>
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
+            {visibleColumnDefinitions.map((column) => (
+              <col
+                key={column.id}
+                data-column={column.id}
+                style={{
+                  width:
+                    column.id === 'source' || column.id === 'model'
+                      ? `calc((100% - ${fixedColumnWidth}px) * ${column.width / flexibleColumnWidth})`
+                      : column.width,
+                }}
+              />
+            ))}
           </colgroup>
           <thead>
             <tr>
-              <th>{sourceApiKeyLabel}</th>
-              <th>{t('monitoring.column_model')}</th>
-              <th className={styles.realtimeSettingsColumn}>{reasoningServiceLabel}</th>
-              <th className={styles.realtimeCenteredColumn}>{recentStatusLabel}</th>
-              <th className={styles.realtimeCenteredColumn}>{requestStatusLabel}</th>
-              <th className={styles.realtimeCenteredColumn}>{successRateLabel}</th>
-              <th className={styles.realtimeCenteredColumn}>{totalCallsLabel}</th>
-              <th className={styles.realtimeTpsColumn}>{t('monitoring.column_output_tps')}</th>
-              <th className={styles.realtimeLatencyColumn}>{t('monitoring.elapsed_short')}</th>
-              <th className={styles.realtimeTimeColumn}>{t('monitoring.column_time')}</th>
-              <th>{usageLabel}</th>
-              <th>{costLabel}</th>
+              {visibleColumnDefinitions.map((column) => (
+                <th key={column.id} data-column={column.id}>
+                  {getRealtimeColumnLabel(column.id, t)}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -1141,174 +1342,214 @@ export function RealtimeEventsPanel({
               const ttftToneClass = getRealtimeDurationToneClass(row.ttftMs);
               const latencyToneClass = getRealtimeDurationToneClass(row.latencyMs);
               const tokenUsage = buildRealtimeTokenUsageDetails(row, t);
-              return (
-                <tr key={row.id} className={row.failed ? styles.logRowFailed : undefined}>
-                  <td>
-                    <div className={styles.logTypeCell}>
-                      <div className={styles.primaryCell} title={sourceDisplay.title}>
-                        <span>{sourceDisplay.primary}</span>
-                        {sourceDisplay.meta ? <small>{sourceDisplay.meta}</small> : null}
-                        {sourceDisplay.requestMetadataTitle ? (
-                          <details className={styles.realtimeRequestMetadata}>
-                            <summary>{t('monitoring.request_metadata')}</summary>
-                            <small>
-                              {sourceDisplay.requestMetadataTitle.split('\n').map((line) => (
-                                <span key={line}>{line}</span>
-                              ))}
+              const renderCellContent = (columnId: RealtimeColumnId): ReactNode => {
+                switch (columnId) {
+                  case 'source':
+                    return (
+                      <div className={styles.logTypeCell}>
+                        <div className={styles.primaryCell} title={sourceDisplay.title}>
+                          <span>{sourceDisplay.primary}</span>
+                          {sourceDisplay.meta ? <small>{sourceDisplay.meta}</small> : null}
+                          {sourceDisplay.requestMetadataTitle ? (
+                            <details className={styles.realtimeRequestMetadata}>
+                              <summary>{t('monitoring.request_metadata')}</summary>
+                              <small>
+                                {sourceDisplay.requestMetadataTitle.split('\n').map((line) => (
+                                  <span key={line}>{line}</span>
+                                ))}
+                              </small>
+                            </details>
+                          ) : null}
+                          {apiKeyDisplay ? (
+                            <small
+                              className={styles.realtimeApiKeyLine}
+                              title={apiKeyDisplay.title}
+                            >
+                              {`${t('monitoring.realtime_api_key_label')}: ${apiKeyDisplay.display}`}
                             </small>
-                          </details>
-                        ) : null}
-                        {apiKeyDisplay ? (
-                          <small className={styles.realtimeApiKeyLine} title={apiKeyDisplay.title}>
-                            {`${t('monitoring.realtime_api_key_label')}: ${apiKeyDisplay.display}`}
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  case 'model':
+                    return (
+                      <div
+                        className={`${styles.primaryCell} ${styles.realtimeModelCell}`}
+                        title={[requestedModel, showResolvedModel ? resolvedModel : '']
+                          .filter(Boolean)
+                          .join('\n')}
+                      >
+                        <span className={`${styles.monoCell} ${styles.realtimeModelText}`}>
+                          {requestedModel}
+                        </span>
+                        {showResolvedModel ? (
+                          <small className={`${styles.monoCell} ${styles.realtimeModelText}`}>
+                            {resolvedModel}
                           </small>
                         ) : null}
                       </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div
-                      className={`${styles.primaryCell} ${styles.realtimeModelCell}`}
-                      title={[requestedModel, showResolvedModel ? resolvedModel : '']
-                        .filter(Boolean)
-                        .join('\n')}
+                    );
+                  case 'settings':
+                    return (
+                      <div className={styles.realtimeSettingsCell}>
+                        <span className={styles.realtimeSettingLine}>
+                          <span className={styles.realtimeSettingLabel}>
+                            {t('monitoring.realtime_reasoning_label')}
+                          </span>
+                          <span
+                            className={`${styles.realtimeSettingValue} ${styles.realtimeReasoningValue}`}
+                          >
+                            {reasoningEffort}
+                          </span>
+                        </span>
+                        <span className={styles.realtimeSettingLine}>
+                          <span className={styles.realtimeSettingLabel}>
+                            {t('monitoring.realtime_service_label')}
+                          </span>
+                          <span
+                            className={`${styles.realtimeSettingValue} ${styles.realtimeServiceValue}`}
+                          >
+                            {effectiveServiceTier}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  case 'recent-status':
+                    return (
+                      <div className={styles.recentStatusCell}>
+                        <RecentPattern pattern={row.recentPattern} variant="plain" />
+                      </div>
+                    );
+                  case 'request-status':
+                    return (
+                      <div className={styles.primaryCell}>
+                        {requestDiagnosticDetails ? (
+                          <RealtimeRequestDiagnosticStatus
+                            details={requestDiagnosticDetails}
+                            tooltipId={
+                              requestDiagnosticTooltipId ??
+                              `${tooltipIdPrefix}-request-diagnostic-tooltip`
+                            }
+                            t={t}
+                            onCopy={handleCopyFailureDetails}
+                          />
+                        ) : (
+                          <span
+                            className={[
+                              styles.realtimeRequestStatus,
+                              row.failed
+                                ? styles.realtimeRequestStatusBad
+                                : styles.realtimeRequestStatusGood,
+                            ]
+                              .filter(Boolean)
+                              .join(' ')}
+                          >
+                            {row.failed
+                              ? t('monitoring.result_failed')
+                              : t('monitoring.result_success')}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  case 'success-rate':
+                    return formatPercent(row.successRate);
+                  case 'calls':
+                    return formatCompactNumber(row.requestCount);
+                  case 'tps':
+                    return (
+                      <span className={styles.realtimeTpsCell}>
+                        {formatTokensPerSecond(row.tokensPerSecond, locale)}
+                      </span>
+                    );
+                  case 'latency':
+                    return (
+                      <div className={styles.realtimeMetricCell}>
+                        <span className={styles.realtimeMetricLine}>
+                          <span className={styles.realtimeMetricLabel}>
+                            {t('monitoring.ttft_short')}
+                          </span>
+                          <span
+                            className={[styles.realtimeMetricText, ttftToneClass]
+                              .filter(Boolean)
+                              .join(' ')}
+                          >
+                            {hasTtftMs ? formatRealtimeCompactDuration(row.ttftMs, locale) : '--'}
+                          </span>
+                        </span>
+                        <span className={styles.realtimeMetricLine}>
+                          <span className={styles.realtimeMetricLabel}>
+                            {t('monitoring.elapsed_short')}
+                          </span>
+                          <span
+                            className={[styles.realtimeMetricText, latencyToneClass]
+                              .filter(Boolean)
+                              .join(' ')}
+                          >
+                            {formatRealtimeCompactDuration(row.latencyMs, locale)}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  case 'time':
+                    return (
+                      <div className={styles.realtimeTimeCell}>
+                        <span className={styles.realtimeTimeLine}>{timeParts.date}</span>
+                        <span className={styles.realtimeTimeLine}>{timeParts.time}</span>
+                      </div>
+                    );
+                  case 'usage':
+                    return (
+                      <RealtimeTokenUsage
+                        details={tokenUsage}
+                        tooltipId={`${tooltipIdPrefix}-token-usage-tooltip-${row.id}`}
+                      />
+                    );
+                  case 'cost':
+                    return hasPrices ? formatUsd(row.totalCost, 3) : '--';
+                }
+              };
+
+              const getCellClassName = (column: RealtimeColumnDefinition) => {
+                const classes = [];
+                if (column.align === 'center') {
+                  classes.push(styles.realtimeCenteredColumn);
+                }
+                const columnId = column.id;
+                if (columnId === 'settings') classes.push(styles.realtimeSettingsColumn);
+                if (columnId === 'tps') classes.push(styles.realtimeTpsColumn);
+                if (columnId === 'latency') classes.push(styles.realtimeLatencyColumn);
+                if (columnId === 'time') classes.push(styles.realtimeTimeColumn);
+                if (columnId === 'usage') classes.push(styles.realtimeUsageColumn);
+                if (columnId === 'cost') classes.push(styles.realtimeCostColumn);
+                if (columnId === 'success-rate') {
+                  classes.push(
+                    row.successRate >= 0.95
+                      ? styles.goodText
+                      : row.successRate >= 0.85
+                        ? styles.warnText
+                        : styles.badText
+                  );
+                }
+                return classes.filter(Boolean).join(' ') || undefined;
+              };
+
+              return (
+                <tr key={row.id} className={row.failed ? styles.logRowFailed : undefined}>
+                  {visibleColumnDefinitions.map((column) => (
+                    <td
+                      key={column.id}
+                      data-column={column.id}
+                      className={getCellClassName(column)}
                     >
-                      <span className={`${styles.monoCell} ${styles.realtimeModelText}`}>
-                        {requestedModel}
-                      </span>
-                      {showResolvedModel ? (
-                        <small className={`${styles.monoCell} ${styles.realtimeModelText}`}>
-                          {resolvedModel}
-                        </small>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className={styles.realtimeSettingsColumn}>
-                    <div className={styles.realtimeSettingsCell}>
-                      <span className={styles.realtimeSettingLine}>
-                        <span className={styles.realtimeSettingLabel}>
-                          {t('monitoring.realtime_reasoning_label')}
-                        </span>
-                        <span
-                          className={`${styles.realtimeSettingValue} ${styles.realtimeReasoningValue}`}
-                        >
-                          {reasoningEffort}
-                        </span>
-                      </span>
-                      <span className={styles.realtimeSettingLine}>
-                        <span className={styles.realtimeSettingLabel}>
-                          {t('monitoring.realtime_service_label')}
-                        </span>
-                        <span
-                          className={`${styles.realtimeSettingValue} ${styles.realtimeServiceValue}`}
-                        >
-                          {effectiveServiceTier}
-                        </span>
-                      </span>
-                    </div>
-                  </td>
-                  <td className={styles.realtimeCenteredColumn}>
-                    <div className={styles.recentStatusCell}>
-                      <RecentPattern pattern={row.recentPattern} variant="plain" />
-                    </div>
-                  </td>
-                  <td className={styles.realtimeCenteredColumn}>
-                    <div className={styles.primaryCell}>
-                      {requestDiagnosticDetails ? (
-                        <RealtimeRequestDiagnosticStatus
-                          details={requestDiagnosticDetails}
-                          tooltipId={
-                            requestDiagnosticTooltipId ??
-                            `${tooltipIdPrefix}-request-diagnostic-tooltip`
-                          }
-                          t={t}
-                          onCopy={handleCopyFailureDetails}
-                        />
-                      ) : (
-                        <span
-                          className={[
-                            styles.realtimeRequestStatus,
-                            row.failed
-                              ? styles.realtimeRequestStatusBad
-                              : styles.realtimeRequestStatusGood,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
-                          {row.failed
-                            ? t('monitoring.result_failed')
-                            : t('monitoring.result_success')}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td
-                    className={[
-                      styles.realtimeCenteredColumn,
-                      row.successRate >= 0.95
-                        ? styles.goodText
-                        : row.successRate >= 0.85
-                          ? styles.warnText
-                          : styles.badText,
-                    ].join(' ')}
-                  >
-                    {formatPercent(row.successRate)}
-                  </td>
-                  <td className={styles.realtimeCenteredColumn}>
-                    {formatCompactNumber(row.requestCount)}
-                  </td>
-                  <td className={styles.realtimeTpsColumn}>
-                    <span className={styles.realtimeTpsCell}>
-                      {formatTokensPerSecond(row.tokensPerSecond, locale)}
-                    </span>
-                  </td>
-                  <td className={styles.realtimeLatencyColumn}>
-                    <div className={styles.realtimeMetricCell}>
-                      <span className={styles.realtimeMetricLine}>
-                        <span className={styles.realtimeMetricLabel}>
-                          {t('monitoring.ttft_short')}
-                        </span>
-                        <span
-                          className={[styles.realtimeMetricText, ttftToneClass]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
-                          {hasTtftMs ? formatRealtimeCompactDuration(row.ttftMs, locale) : '--'}
-                        </span>
-                      </span>
-                      <span className={styles.realtimeMetricLine}>
-                        <span className={styles.realtimeMetricLabel}>
-                          {t('monitoring.elapsed_short')}
-                        </span>
-                        <span
-                          className={[styles.realtimeMetricText, latencyToneClass]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
-                          {formatRealtimeCompactDuration(row.latencyMs, locale)}
-                        </span>
-                      </span>
-                    </div>
-                  </td>
-                  <td className={styles.realtimeTimeColumn}>
-                    <div className={styles.realtimeTimeCell}>
-                      <span className={styles.realtimeTimeLine}>{timeParts.date}</span>
-                      <span className={styles.realtimeTimeLine}>{timeParts.time}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <RealtimeTokenUsage
-                      details={tokenUsage}
-                      tooltipId={`${tooltipIdPrefix}-token-usage-tooltip-${row.id}`}
-                    />
-                  </td>
-                  <td>{hasPrices ? formatUsd(row.totalCost, 3) : '--'}</td>
+                      {renderCellContent(column.id)}
+                    </td>
+                  ))}
                 </tr>
               );
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={12}>{emptyState}</td>
+                <td colSpan={visibleColumnDefinitions.length}>{emptyState}</td>
               </tr>
             ) : null}
           </tbody>
